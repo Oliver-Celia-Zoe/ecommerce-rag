@@ -1,9 +1,15 @@
 {
   "name": "ecommerce-rag",
   "private": true,
+  "version": "1.0.0",
+  "description": "空气炸锅智能客服 - Air Fryer AI Assistant",
   "scripts": {
-    "install": "cd frontend && npm install",
-    "build": "cd frontend && vite build",
-    "dev": "cd frontend && vite"
+    "postinstall": "cd frontend && npm install",
+    "build": "cd frontend && npx vite build",
+    "dev": "cd frontend && npx vite"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=18"
   }
 }
