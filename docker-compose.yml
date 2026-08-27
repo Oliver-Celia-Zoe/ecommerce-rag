@@ -1,0 +1,92 @@
+# ==========================================
+# Air Fryer AI Assistant - 基础 Compose 配置
+# 所有环境（dev/prod）共用的数据服务
+# backend / frontend 在 dev/prod override 文件里定义
+# ==========================================
+# 启动方式：
+#   开发：docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#   生产：docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+name: air-fryer-ai
+
+services:
+  # -------- PostgreSQL 数据库 --------
+  # 存用户、订单、商品、对话记录等结构化数据
+  postgres:
+    image: postgres:16-alpine
+    container_name: air-fryer-postgres
+    environment:
+      - POSTGRES_DB=ecommerce_rag          # 启动时自动创建的数据库
+      - POSTGRES_USER=postgres
+      # 密码用 ${VAR:-default} 语法：变量不存在时用默认值 postgres
+      # dev 环境不设 POSTGRES_PASSWORD → 用默认 postgres（本地无所谓）
+      # prod 环境从 .env.prod 读真实密码 → 覆盖默认值
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - pgdata:/var/lib/postgresql/data     # named volume：数据持久化
+    restart: unless-stopped
+    networks:
+      - app-network
+    # 健康检查：backend 启动前要等 pg 就绪
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # -------- Qdrant 向量库 --------
+  # 存知识文档的向量（RAG 检索用）
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: air-fryer-qdrant
+    volumes:
+      - qdrant_storage:/qdrant/storage      # named volume：向量数据持久化
+    restart: unless-stopped
+    networks:
+      - app-network
+    healthcheck:
+      # 简化：只检查 6333 端口能否连接（bash /dev/tcp 特性）
+      # qdrant 镜像没有 wget/curl，但 bash 的 /dev/tcp 可用
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/6333' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # -------- Redis 缓存 --------
+  # 限流计数、会话缓存
+  redis:
+    image: redis:7-alpine
+    container_name: air-fryer-redis
+    command: redis-server --appendonly yes  # AOF 持久化
+    volumes:
+      - redisdata:/data
+    restart: unless-stopped
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+# ---------- 数据卷（named volume，Docker 管理）----------
+# 容器删除后数据还在，重新启动数据不丢
+volumes:
+  pgdata:
+    driver: local
+  qdrant_storage:
+    driver: local
+  redisdata:
+    driver: local
+  # Ollama 模型存储（dev 用宿主机 ollama 时不需要，prod 用容器 ollama 时需要）
+  ollama_models:
+    driver: local
+
+# ---------- 网络 ----------
+# 所有服务加入同一个网络，可以用服务名互相访问
+# 例如 backend 容器里访问 postgres:5432 / qdrant:6333 / redis:6379
+networks:
+  app-network:
+    driver: bridge

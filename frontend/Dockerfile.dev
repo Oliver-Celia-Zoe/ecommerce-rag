@@ -1,0 +1,33 @@
+# ==========================================
+# 前端开发 Dockerfile（HMR 热更新）
+# ==========================================
+# 与生产 Dockerfile 的区别：
+#   1. 单阶段，用 node 镜像（开发无所谓体积）
+#   2. 不 COPY 源码（通过 volume 挂载，本地改 → 容器实时同步）
+#   3. 启动 vite dev server + HMR
+#
+# 工作机制：
+#   - 镜像里只有 node_modules（依赖）
+#   - compose 把本地 ./frontend/src 挂载到容器 /app
+#   - 你改本地 .tsx → 容器内 vite 通过 HMR 立即更新浏览器
+#   - /api 请求由 vite proxy 转发到后端容器（vite.config.ts 配置）
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+# 复制依赖描述文件
+COPY package.json package-lock.json ./
+
+# 安装依赖
+RUN npm ci
+
+# 不 COPY 源码，由 compose 的 volume 挂载提供
+# 但要创建 node_modules 的占位（避免 volume 挂载覆盖）
+# 注：volume 挂载 /app 时，会覆盖容器内的 node_modules
+# 所以 compose 里只挂载 src 和具体文件，不挂载整个 /app
+
+EXPOSE 5173
+
+# vite dev server，--host 0.0.0.0 让容器外可访问
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

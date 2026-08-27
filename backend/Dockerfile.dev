@@ -1,0 +1,42 @@
+# ==========================================
+# 开发环境 Dockerfile（热更新）
+# 构建：docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# ==========================================
+# 与生产 Dockerfile 的关键区别：
+#   1. 单阶段构建（不需要精简，开发镜像大点无所谓）
+#   2. 装 dev 依赖（pytest、black 等方便在容器里跑测试和格式化）
+#   3. 不 COPY 源码（通过 volume 挂载，本地改代码 → 容器实时同步）
+#   4. uvicorn --reload（监听文件变化自动重启）
+#
+# 工作机制：
+#   - 镜像里只有 .venv（依赖）+ pyproject.toml
+#   - compose 把本地 ./backend/app 挂载到容器 /app/app
+#   - 你在本地改 app/ 下任何 .py 文件 → 容器内 uvicorn 自动重启
+#   - 重新装依赖时才需要重建镜像（uv sync 跑一次）
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# 装 uv
+RUN pip install --no-cache-dir uv
+
+# 复制依赖描述文件
+COPY pyproject.toml uv.lock ./
+RUN touch README.md
+
+# 装依赖（包含 dev 依赖，方便在容器内跑 pytest、black、mypy）
+# --frozen: 严格按 lock 文件
+# --no-install-project: 源码会通过 volume 挂载，这里不装项目本身
+RUN uv sync --frozen --no-install-project
+
+# 环境变量
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    APP_ENV=dev
+
+EXPOSE 8000
+
+# 开发模式启动：--reload 监听文件变化自动重启
+# 源码由 docker-compose 的 volume 挂载提供，本地改代码 → 容器自动重载
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "app"]

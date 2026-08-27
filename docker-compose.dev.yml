@@ -1,0 +1,108 @@
+# ==========================================
+# 开发环境 Compose 覆盖配置
+# 与 docker-compose.yml 一起使用：
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# 或用 Makefile：make dev
+# ==========================================
+# 特点：
+#   1. 源码通过 volume 挂载，本地改代码 → 容器热更新
+#   2. LLM 用 Ollama（宿主机或容器内）
+#   3. 暴露所有数据服务端口，方便本地工具连接调试
+#   4. extra_hosts 让容器能访问宿主机的 Ollama
+
+services:
+  # -------- 后端（开发模式）--------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: air-fryer-backend-dev
+    ports:
+      - "8000:8000"        # 暴露后端，访问 /docs 看 API 文档
+    environment:
+      - APP_ENV=dev
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+      # 容器间用服务名通信
+      - DATABASE_URL=postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/ecommerce_rag
+      - QDRANT_URL=http://qdrant:6333
+      - REDIS_URL=redis://redis:6379/0
+      # LLM：dev 用 Ollama
+      - LLM_PROVIDER=ollama
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434   # 指向宿主机 Ollama
+      - OLLAMA_MODEL=qwen3.5:2b
+      - OLLAMA_EMBEDDING_MODEL=nomic-embed-text
+      - PYTHONPATH=/app                       # 让 python -m 能找到 app/scripts 模块
+    volumes:
+      # 源码挂载：本地改 .py → 容器 uvicorn --reload 自动重启
+      - ./backend/app:/app/app
+      - ./backend/alembic:/app/alembic
+      - ./backend/alembic.ini:/app/alembic.ini
+      # 知识文档挂载（bind mount）：本地改 md → 容器立即可见
+      - ./backend/data:/app/data
+      # 脚本目录挂载（import_knowledge.py 等工具脚本）
+      - ./backend/scripts:/app/scripts
+    # Linux 下让容器能访问宿主机的 host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # -------- 前端（开发模式）--------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: air-fryer-frontend-dev
+    ports:
+      - "5173:5173"        # Vite dev server
+    environment:
+      # vite proxy 指向容器网络内的 backend 服务
+      - VITE_PROXY_TARGET=http://backend:8000
+    volumes:
+      # 源码挂载：本地改 .tsx → 浏览器 HMR 立即更新
+      # 注意：不挂载整个 /app，否则会覆盖容器内的 node_modules
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+      - ./frontend/index.html:/app/index.html
+      - ./frontend/vite.config.ts:/app/vite.config.ts
+      - ./frontend/tsconfig.json:/app/tsconfig.json
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # -------- Ollama（可选，profile 模式）--------
+  # 默认不启动，用宿主机 Ollama 即可
+  # 如果宿主机没装 Ollama，用：docker compose --profile ollama -f docker-compose.yml -f docker-compose.dev.yml up
+  ollama:
+    profiles: ["ollama"]
+    image: ollama/ollama:latest
+    container_name: air-fryer-ollama-dev
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # -------- 开发环境暴露数据服务端口（方便本地工具连接）--------
+  postgres:
+    ports:
+      - "5432:5432"        # Navicat / pgAdmin 连接用
+  qdrant:
+    ports:
+      - "6333:6333"        # Qdrant Dashboard 访问 http://localhost:6333/dashboard
+  redis:
+    ports:
+      - "6379:6379"        # RedisInsight 连接用

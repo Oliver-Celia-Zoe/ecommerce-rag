@@ -1,0 +1,34 @@
+# Docker 构建时忽略的文件
+
+# 依赖（容器内自己装）
+node_modules/
+
+# 构建产物（容器内自己 build）
+dist/
+
+# IDE
+.vscode/
+.idea/
+
+# Git
+.git/
+.gitignore
+
+# 环境变量（敏感）
+.env
+.env.*
+!.env.example
+
+# 测试
+coverage/
+
+# Docker 自身
+Dockerfile*
+.dockerignore
+
+# 日志
+*.log
+
+# 操作系统
+.DS_Store
+Thumbs.db

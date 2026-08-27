@@ -1,0 +1,88 @@
+# ==========================================
+# 生产环境 Compose 覆盖配置
+# 与 docker-compose.yml 一起使用：
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# 或用 Makefile：make prod
+# ==========================================
+# 特点：
+#   1. backend 用多阶段构建镜像（小、安全），不挂载源码
+#   2. LLM 用 DeepSeek（国内访问稳定、价格低）
+#   3. frontend 用 nginx 托管构建产物 + 反向代理
+#   4. 不暴露数据服务端口（安全），只暴露 80（前端）
+#   5. Ollama 容器跑 embedding（DeepSeek 无 embedding API 的权宜方案）
+#
+# 敏感变量（DEEPSEEK_API_KEY / SECRET_KEY）从 .env.prod 读取
+# .env.prod 不进 git，手动创建
+
+services:
+  # -------- 后端（生产模式）--------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile       # 生产 Dockerfile（多阶段构建）
+    container_name: air-fryer-backend-prod
+    ports:
+      - "8000:8000"                # 生产也暴露后端，方便健康检查；如需更安全可去掉，只走 nginx
+    environment:
+      - APP_ENV=prod
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+      - DATABASE_URL=postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/ecommerce_rag
+      - QDRANT_URL=http://qdrant:6333
+      - REDIS_URL=redis://redis:6379/0
+      # LLM：prod 用 DeepSeek
+      - LLM_PROVIDER=deepseek
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}      # 从 .env.prod 读
+      - DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
+      - DEEPSEEK_MODEL=deepseek-chat
+      # Embedding：DeepSeek 无 embedding API，仍用 Ollama
+      - OLLAMA_BASE_URL=http://ollama:11434      # 指向容器内的 ollama 服务
+      - OLLAMA_EMBEDDING_MODEL=nomic-embed-text
+      # 安全配置
+      - SECRET_KEY=${SECRET_KEY}                  # 生产 JWT 密钥，从 .env.prod 读
+    volumes:
+      # 知识文档挂载（bind mount）：方便更新知识库不用重建镜像
+      - ./backend/data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # -------- 前端（生产模式）--------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile       # 生产 Dockerfile（node 构建 → nginx 托管）
+    container_name: air-fryer-frontend-prod
+    ports:
+      - "80:80"                    # nginx 监听 80
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # -------- Ollama（生产用，仅跑 embedding）--------
+  # DeepSeek 不提供 embedding API，向量检索仍需 Ollama 跑 nomic-embed-text
+  # 后续可改用云端 embedding（如智谱、阿里）来去掉这个服务
+  ollama:
+    image: ollama/ollama:latest
+    container_name: air-fryer-ollama-prod
+    volumes:
+      - ollama_models:/root/.ollama
+    restart: unless-stopped
+    networks:
+      - app-network
+    # 生产不暴露端口，只在容器网络内被 backend 访问
+    # 首次部署需手动拉模型：docker exec air-fryer-ollama-prod ollama pull nomic-embed-text
+
+  # -------- 生产环境不暴露数据服务端口（安全）--------
+  # postgres / qdrant / redis 用基础配置，不加端口映射
