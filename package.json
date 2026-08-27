@@ -1,0 +1,9 @@
+{
+  "name": "ecommerce-rag",
+  "private": true,
+  "scripts": {
+    "install": "cd frontend && npm install",
+    "build": "cd frontend && vite build",
+    "dev": "cd frontend && vite"
+  }
+}

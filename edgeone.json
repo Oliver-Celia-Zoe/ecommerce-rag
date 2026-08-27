@@ -1,0 +1,12 @@
+{
+  "buildCommand": "cd frontend && vite build",
+  "installCommand": "cd frontend && npm install",
+  "outputDirectory": "frontend/dist",
+  "nodeVersion": "20",
+  "rewrites": [
+    {
+      "source": "/*",
+      "destination": "/index.html"
+    }
+  ]
+}
