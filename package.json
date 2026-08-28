@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "空气炸锅智能客服 - Air Fryer AI Assistant",
   "scripts": {
-    "postinstall": "cd frontend && npm install",
+    "postinstall": "cd frontend && rm -f package-lock.json && npm install",
     "build": "cd frontend && npx vite build",
     "dev": "cd frontend && npx vite"
   },
